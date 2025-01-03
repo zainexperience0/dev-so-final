@@ -1,16 +1,16 @@
+import { generateVerificationToken } from "@/lib/auth/generateTokens";
+import { sendVerificationEmail } from "@/lib/auth/Mailing";
+import { getUserByEmail } from "@/lib/auth/user";
 import { db } from "@/lib/db";
 import bcrypt from "bcryptjs";
 import { NextRequest, NextResponse } from "next/server";
+import { generateFromEmail } from "unique-username-generator";
 
 export async function POST(req: NextRequest) {
   try {
     const { name, email, password } = await req.json();
     const hashedPassword = await bcrypt.hash(password, 12);
-    const existingUser = await db.user.findUnique({
-      where: {
-        email,
-      },
-    });
+    const existingUser = await getUserByEmail(email);
     if (email) {
       if (existingUser) {
         return NextResponse.json(
@@ -23,8 +23,14 @@ export async function POST(req: NextRequest) {
           name,
           email,
           password: hashedPassword,
+          username: generateFromEmail(email, 4),
         },
       });
+      const verificationToken = await generateVerificationToken(email);
+      await sendVerificationEmail(
+        verificationToken.email,
+        verificationToken.token,
+      );
       return NextResponse.json(
         {
           user,

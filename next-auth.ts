@@ -5,6 +5,8 @@ import bcrypt from "bcryptjs";
 import { generateFromEmail } from "unique-username-generator";
 import { nanoid } from "nanoid";
 import authConfig from "./next-auth.config";
+import { getUserByEmail, getUserById } from "./lib/auth/user";
+import { getTwoFactorConfirmationByUserId } from "./lib/auth/two-factor-confirmation";
 
 export const {
   handlers: { GET, POST },
@@ -44,29 +46,62 @@ export const {
   },
   callbacks: {
     async jwt({ token }) {
-      const id = token.sub;
-      if (!id) return token;
+      if (!token.sub) return token;
+      const existingUser = await getUserById(token.sub);
+
+      if (!existingUser) return token;
+      const existingAccount = await db.account.findFirst({
+        where: {
+          userId: existingUser.id,
+        },
+      })
       const dbUser = await db.user.findUnique({
         where: {
-          id,
-        },
-        select: {
-          username: true,
-        },
-      });
+          id: existingUser.id,
+        }
+      })
+      token.isOAuth = !!existingAccount;
+      token.name = existingUser.name;
+      token.email = existingUser.email;
+      token.isTwoFactorEnabled = existingUser.isTwoFactorEnabled;
       return {
         ...token,
         username: dbUser?.username,
       };
     },
     async session({ session, token }) {
-     if(token.sub){
-      session.user.id = token.sub;
-     }
-     if(token.username){
-      session.user.username = token.username as string;
-     }
+      if (token.sub) {
+        session.user.id = token.sub;
+      }
+      if (token.username) {
+        session.user.username = token.username as string;
+      }
+      if (session.user) {
+        session.user.isTwoFactorEnabled = token.isTwoFactorEnabled as boolean;
+      }
+
+      if (session.user) {
+        session.user.name = token.name;
+        session.user.email = token.email as string;
+        session.user.isOAuth = token.isOAuth as boolean;
+      }
       return session;
+    },
+    async signIn({ user, account }) {
+      if (account?.provider !== "credentials") return true;
+      const existingUser = await getUserById(user.id!);
+      // Prevent sign in without email verification
+      if (!existingUser?.emailVerified) return false;
+      if (existingUser.isTwoFactorEnabled) {
+        const twoFactorConfirmation = await getTwoFactorConfirmationByUserId(user.id!);
+        if (!twoFactorConfirmation) return false;
+        await db.twoFactorConfirmation.delete({
+          where: {
+            id: twoFactorConfirmation.id,
+          },
+        })
+      }
+      return true;
     },
   },
   pages: {

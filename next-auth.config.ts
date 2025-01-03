@@ -1,8 +1,8 @@
 import { NextAuthConfig } from "next-auth";
 import Google from "next-auth/providers/google";
 import Credentials from "next-auth/providers/credentials";
-import { db } from "./lib/db";
 import bcrypt from "bcryptjs";
+import { getUserByEmail } from "./lib/auth/user";
 
 export default {
   providers: [
@@ -32,11 +32,7 @@ export default {
         if (!credentials.email || !credentials.password) {
           throw new Error("Please enter email and password.");
         }
-        const user = await db.user.findUnique({
-          where: {
-            email: credentials.email as string,
-          },
-        });
+        const user = await getUserByEmail(credentials.email as string);
         if (!user || !user?.password) {
           throw new Error("User was not found, Please enter valid email");
         }
@@ -44,6 +40,7 @@ export default {
           credentials.password as string,
           user.password
         );
+
         if (!passwordMatch) {
           throw new Error(
             "The entered password is incorrect, please enter the correct one."
